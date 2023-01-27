@@ -299,15 +299,7 @@ bool NimBLEScan::isScanning() {
     return ble_gap_disc_active();
 }
 
-
-/**
- * @brief Start scanning.
- * @param [in] duration The duration in seconds for which to scan.
- * @param [in] scanCompleteCB A function to be called when scanning has completed.
- * @param [in] is_continue Set to true to save previous scan results, false to clear them.
- * @return True if scan started or false if there was an error.
- */
-bool NimBLEScan::start(uint32_t duration, void (*scanCompleteCB)(NimBLEScanResults), bool is_continue) {
+bool NimBLEScan::startMilliseconds(uint32_t duration, void (*scanCompleteCB)(NimBLEScanResults), bool is_continue) {
     NIMBLE_LOGD(LOG_TAG, ">> start: duration=%" PRIu32, duration);
 
     // Save the callback to be invoked when the scan completes.
@@ -318,10 +310,6 @@ bool NimBLEScan::start(uint32_t duration, void (*scanCompleteCB)(NimBLEScanResul
     // If 0 duration specified then we assume a continuous scan is desired.
     if(duration == 0){
         duration = BLE_HS_FOREVER;
-    }
-    else{
-        // convert duration to milliseconds
-        duration = duration * 1000;
     }
 
     // Set the flag to ignore the results while we are deleting the vector
@@ -387,6 +375,38 @@ bool NimBLEScan::start(uint32_t duration, void (*scanCompleteCB)(NimBLEScanResul
         return false;
     }
     return true;
+}
+
+NimBLEScanResults NimBLEScan::startMilliseconds(uint32_t duration, bool is_continue) {
+    if(duration == 0) {
+        NIMBLE_LOGW(LOG_TAG, "Blocking scan called with duration = forever");
+    }
+
+    TaskHandle_t cur_task = xTaskGetCurrentTaskHandle();
+    ble_task_data_t taskData = {nullptr, cur_task, 0, nullptr};
+    m_pTaskData = &taskData;
+
+    if(startMilliseconds(duration, nullptr, is_continue)) {
+#ifdef ulTaskNotifyValueClear
+        // Clear the task notification value to ensure we block
+        ulTaskNotifyValueClear(cur_task, ULONG_MAX);
+#endif
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    }
+
+    m_pTaskData = nullptr;
+    return m_scanResults;
+}
+
+/**
+ * @brief Start scanning.
+ * @param [in] duration The duration in seconds for which to scan.
+ * @param [in] scanCompleteCB A function to be called when scanning has completed.
+ * @param [in] is_continue Set to true to save previous scan results, false to clear them.
+ * @return True if scan started or false if there was an error.
+ */
+bool NimBLEScan::start(uint32_t duration, void (*scanCompleteCB)(NimBLEScanResults), bool is_continue) {
+    return startMilliseconds(duration * 1000, scanCompleteCB, is_continue);
 } // start
 
 
@@ -397,24 +417,7 @@ bool NimBLEScan::start(uint32_t duration, void (*scanCompleteCB)(NimBLEScanResul
  * @return The NimBLEScanResults.
  */
 NimBLEScanResults NimBLEScan::start(uint32_t duration, bool is_continue) {
-    if(duration == 0) {
-        NIMBLE_LOGW(LOG_TAG, "Blocking scan called with duration = forever");
-    }
-
-    TaskHandle_t cur_task = xTaskGetCurrentTaskHandle();
-    ble_task_data_t taskData = {nullptr, cur_task, 0, nullptr};
-    m_pTaskData = &taskData;
-
-    if(start(duration, nullptr, is_continue)) {
-#ifdef ulTaskNotifyValueClear
-        // Clear the task notification value to ensure we block
-        ulTaskNotifyValueClear(cur_task, ULONG_MAX);
-#endif
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    }
-
-    m_pTaskData = nullptr;
-    return m_scanResults;
+   return startMilliseconds(duration * 1000, is_continue);
 } // start
 
 
